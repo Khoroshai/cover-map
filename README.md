@@ -1,9 +1,12 @@
 # cover-map
 Small Android app where you can highlight places on the world map.
-Main use is to track where you'be been or plan where you want to go.
+Main use is to track where you've been or plan where you want to go.
 
 All data synced to your Google Drive.
 You can use it without syncing and keep data locally but they may get wiped once you sync.
+
+![example1](/example/example1.png)
+![example2](/example/example2.png)
 
 ## set up
 - add **android** folder as a new project in Android Studio.
