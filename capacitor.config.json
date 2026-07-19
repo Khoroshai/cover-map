@@ -1,8 +1,5 @@
 {
   "appId": "com.covermap.app",
   "appName": "CoverMap",
-  "webDir": "www",
-  "server": {
-    "scheme": "covermap"
-  }
+  "webDir": "www"
 }

@@ -132,8 +132,6 @@ button.secondary:hover { background: #445; }
 <script>
 (function() {
   var STORAGE_KEY = 'cover-highlights';
-  var GDRIVE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwOpYl5jIFwU5q3aIzXKAm6dB8bYiBa_Q0phx7hMTWozwXWcAA1RySwKI3lzJgqg0NBjQ/exec';  // Set to your deployed Apps Script URL, e.g. 'https://script.google.com/macros/s/XXXX/exec'
-  var FILE_NAME = 'cover-map-highlights.json';
   var canvas = document.getElementById('draw-canvas');
   var ctx = canvas.getContext('2d');
   var cursorEl = document.getElementById('cursor-circle');
@@ -454,77 +452,43 @@ button.secondary:hover { background: #445; }
     el.textContent = text;
   }
 
+  function isCapacitor() {
+    return typeof Capacitor !== 'undefined' && Capacitor.isNativePlatform();
+  }
+
+  function isGDriveAvailable() {
+    return isCapacitor() && Capacitor.Plugins.GoogleDrive;
+  }
+
   function isGDriveConfigured() {
-    return GDRIVE_SCRIPT_URL && GDRIVE_SCRIPT_URL.length > 10;
+    return isGDriveAvailable();
   }
 
   function syncToGDrive() {
     if (!isGDriveConfigured()) return;
-
-    var token = localStorage.getItem('gdrive_token');
-    var fileId = localStorage.getItem('gdrive_fileId');
-
-    if (!token || !fileId) return;
-
     setSyncStatus('syncing', 'Saving...');
     var payload = JSON.stringify({ highlights: highlights, globalOpacity: globalOpacity });
-
-    fetch('https://www.googleapis.com/upload/drive/v3/files/' + fileId + '?uploadType=media', {
-      method: 'PATCH',
-      headers: {
-        'Authorization': 'Bearer ' + token,
-        'Content-Type': 'application/json'
-      },
-      body: payload
-    })
-    .then(function(response) {
-      if (response.ok) {
-        setSyncStatus('synced', 'Saved');
-        setTimeout(function() { setSyncStatus('', ''); }, 3000);
-      } else if (response.status === 401) {
-        setSyncStatus('syncing', 'Refreshing Auth...');
-        localStorage.removeItem('gdrive_token'); 
-        
-        openGDriveAuth();
-      } else {
+    Capacitor.Plugins.GoogleDrive.writeFile({ data: payload })
+      .then(function(result) {
+        if (result && result.ok) {
+          setSyncStatus('synced', 'Saved');
+          setTimeout(function() { setSyncStatus('', ''); }, 3000);
+        } else {
+          setSyncStatus('error', 'Save failed');
+          setTimeout(function() { setSyncStatus('', ''); }, 5000);
+        }
+      })
+      .catch(function(err) {
         setSyncStatus('error', 'Save failed');
-      }
-    })
-    .catch(function(err) {
-      setSyncStatus('error', 'Network error');
-    });
+        setTimeout(function() { setSyncStatus('', ''); }, 5000);
+      });
   }
-  
+
   function loadFromGDrive(callback) {
     if (!isGDriveConfigured()) { callback(); return; }
-    console.log('loadFromGDrive called');
     setSyncStatus('syncing', 'Loading...');
-    var cbName = 'gdrive_cb_' + Date.now();
-    var script = document.createElement('script');
-    var timeout = setTimeout(function() {
-      console.log('loadFromGDrive timeout');
-      window[cbName] = null;
-      try { script.remove(); } catch(e) {}
-      setSyncStatus('error', 'Not connected - click GDrive');
-      setTimeout(function() { setSyncStatus('', ''); }, 5000);
-      callback();
-    }, 15000);
-    var attempts = 0;
-    var maxAttempts = 3;
-    function tryLoad() {
-      attempts++;
-      console.log('loadFromGDrive attempt', attempts);
-      window[cbName] = function(data) {
-        console.log('loadFromGDrive callback:', data);
-        clearTimeout(timeout);
-        window[cbName] = null;
-        try { script.remove(); } catch(e) {}
-        if (data && data.error) {
-          setSyncStatus('error', 'Failed: ' + data.error);
-          setTimeout(function() { setSyncStatus('', ''); }, 5000);
-          callback();
-          return;
-        }
+    Capacitor.Plugins.GoogleDrive.readFile()
+      .then(function(data) {
         if (data && data.highlights) {
           highlights = data.highlights;
           globalOpacity = data.globalOpacity != null ? data.globalOpacity : 0.5;
@@ -536,97 +500,36 @@ button.secondary:hover { background: #445; }
           setTimeout(function() { setSyncStatus('', ''); }, 3000);
         }
         callback();
-      };
-      script.src = GDRIVE_SCRIPT_URL + (GDRIVE_SCRIPT_URL.indexOf('?') >= 0 ? '&' : '?') + 'callback=' + cbName;
-      script.onerror = function() {
-        console.log('loadFromGDrive script error, attempt', attempts);
-        clearTimeout(timeout);
-        window[cbName] = null;
-        try { script.remove(); } catch(e) {}
-        if (attempts < maxAttempts) {
-          setTimeout(tryLoad, 1000);
-        } else {
-          setSyncStatus('error', 'Not connected - click GDrive');
-          setTimeout(function() { setSyncStatus('', ''); }, 5000);
-          callback();
-        }
-      };
-      document.body.appendChild(script);
-    }
-    tryLoad();
-  }
-
-  function isCapacitor() {
-    return typeof Capacitor !== 'undefined' && Capacitor.isNativePlatform();
+      })
+      .catch(function(err) {
+        setSyncStatus('error', 'Load failed');
+        setTimeout(function() { setSyncStatus('', ''); }, 5000);
+        callback();
+      });
   }
 
   function openGDriveAuth() {
-    if (!isGDriveConfigured()) {
-      toast('Google Drive sync not configured');
+    if (!isGDriveAvailable()) {
+      toast('Google Drive sync not available');
       return;
     }
     saveData();
-    var appUrl = window.location.href.replace(/[?#].*$/, '');
-    var redirectUrl = isCapacitor() ? 'covermap://auth' : appUrl;
-    var targetUrl = GDRIVE_SCRIPT_URL + '?redirect=' + encodeURIComponent(redirectUrl);
-
-    if (isCapacitor() && Capacitor.Plugins.Browser) {
-      Capacitor.Plugins.Browser.open({ url: targetUrl });
-    } else {
-      window.location.href = targetUrl;
-    }
-  }
-
-  if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.App) {
-      Capacitor.Plugins.App.addListener('appUrlOpen', function(data) {
-        if (data && data.url && data.url.indexOf('covermap://') === 0) {
-          
-          if (Capacitor.Plugins.Browser) {
-            Capacitor.Plugins.Browser.close();
-          }
-
-          var urlParams = new URLSearchParams(data.url.split('?')[1] || '');
-          var gdriveData = urlParams.get('data');
-          var gdriveError = urlParams.get('error');
-          var token = urlParams.get('token');
-          var fileId = urlParams.get('fileId');
-
-          if (token && fileId) {
-            localStorage.setItem('gdrive_token', token);
-            localStorage.setItem('gdrive_fileId', fileId);
-            
-            scheduleSync();
-          }
-
-          if (gdriveError) {
-            setSyncStatus('error', 'Failed: ' + decodeURIComponent(gdriveError));
-            setTimeout(function() { setSyncStatus('', ''); }, 5000);
-            return;
-          }
-
-          if (gdriveData) {
-            try {
-              var parsed = JSON.parse(decodeURIComponent(gdriveData));
-              highlights = parsed.highlights || [];
-              globalOpacity = parsed.globalOpacity != null ? parsed.globalOpacity : 0.5;
-              saveData();
-              var opacityPercent = Math.round(globalOpacity * 100);
-              brushOpacity.value = opacityPercent;
-              brushOpacityVal.textContent = opacityPercent + '%';
-              renderAll();
-              setSyncStatus('synced', 'Loaded');
-              setTimeout(function() { setSyncStatus('', ''); }, 3000);
-              toast('Connected to GDrive');
-            } catch(e) {
-              console.log('Failed to parse GDrive data:', e);
-              setSyncStatus('error', 'Parse failed');
-              setTimeout(function() { setSyncStatus('', ''); }, 5000);
-            }
-          } else {
-            toast('No data returned');
-          }
+    Capacitor.Plugins.GoogleDrive.authorize()
+      .then(function(result) {
+        if (result && result.connected) {
+          toast('Connected to GDrive');
+          loadFromGDrive(function() {
+            var opacityPercent = Math.round(globalOpacity * 100);
+            brushOpacity.value = opacityPercent;
+            brushOpacityVal.textContent = opacityPercent + '%';
+            renderAll();
+          });
         }
-    });
+      })
+      .catch(function(err) {
+        setSyncStatus('error', 'Auth failed');
+        setTimeout(function() { setSyncStatus('', ''); }, 5000);
+      });
   }
 
   var syncDebounce = null;
@@ -641,8 +544,8 @@ button.secondary:hover { background: #445; }
 
   btnGdrive.addEventListener('click', function(e) {
     e.stopPropagation();
-    if (!isGDriveConfigured()) {
-      toast('Google Drive sync not configured');
+    if (!isGDriveAvailable()) {
+      toast('Google Drive sync not available');
       return;
     }
     modalOverlay.classList.add('show');
@@ -682,17 +585,23 @@ button.secondary:hover { background: #445; }
   }
 
   if (isGDriveConfigured()) {
-    if (localStorage.getItem('gdrive_token')) {
-      loadFromGDrive(function() {
-        var opacityPercent = Math.round(globalOpacity * 100);
-        brushOpacity.value = opacityPercent;
-        brushOpacityVal.textContent = opacityPercent + '%';
-        renderAll();
-        toast('Loaded from GDrive');
+    Capacitor.Plugins.GoogleDrive.isConnected()
+      .then(function(result) {
+        if (result && result.connected) {
+          loadFromGDrive(function() {
+            var opacityPercent = Math.round(globalOpacity * 100);
+            brushOpacity.value = opacityPercent;
+            brushOpacityVal.textContent = opacityPercent + '%';
+            renderAll();
+            toast('Loaded from GDrive');
+          });
+        } else {
+          setSyncStatus('', 'Not connected');
+        }
+      })
+      .catch(function() {
+        setSyncStatus('', 'Not connected');
       });
-    } else {
-      setSyncStatus('', 'Not connected');
-    }
   }
 })();
 </script>

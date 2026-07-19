@@ -19,3 +19,15 @@ You can use it without syncing and keep data locally but they may get wiped once
 After any changes in [www](/www) folder, run `npx cap sync android` to update the android project.
 
 After any changes in [gdrive-script](gdrive-script.gs), paste it to your App Script and save. Then *manage deployement* -> select yours, edit (pencil icon) -> change version to *new version*.
+
+## functionalities
+- change all highlights color / opacity
+- brush size
+- stroke eraser
+- load / save to GDrive
+- zoomed out visibility
+- highlighted area percentage
+
+## security & bugs
+That's a quick project made just for fun.
+There might be some security issues or bugs that i missed.
