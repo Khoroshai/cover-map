@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">CoverMap</string>
+    <string name="title_activity_main">CoverMap</string>
+    <string name="package_name">com.covermap.app</string>
+    <string name="custom_url_scheme">com.covermap.app</string>
+</resources>

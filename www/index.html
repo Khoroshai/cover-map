@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cover Map Highlighter</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #eee; overflow: hidden; height: 100vh; }
+
+#controls {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+  background: rgba(22, 33, 62, 0.95); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
+  padding: 10px 16px; display: flex; align-items: center; gap: 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.1); flex-wrap: wrap;
+}
+#controls label { font-size: 13px; color: #aab; white-space: nowrap; }
+#controls input[type="color"] { width: 36px; height: 36px; border: 2px solid #445; border-radius: 8px; cursor: pointer; background: none; padding: 2px; }
+#controls input[type="range"] { width: 100px; accent-color: #e94560; }
+.control-group { display: flex; align-items: center; gap: 6px; }
+.control-group .val { font-size: 12px; color: #e94560; min-width: 28px; text-align: right; font-variant-numeric: tabular-nums; }
+button {
+  background: #e94560; color: #fff; border: none; padding: 8px 14px;
+  border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 500;
+  transition: background 0.2s;
+}
+button:hover { background: #c73650; }
+button.secondary { background: #334; }
+button.secondary:hover { background: #445; }
+.spacer { flex: 1; }
+#mode-indicator { font-size: 12px; padding: 4px 10px; border-radius: 12px; background: #334; }
+#mode-indicator.active { background: #e94560; }
+
+#map { width: 100vw; height: 100vh; padding-top: 60px; background: #0f3460; }
+#draw-canvas {
+  position: absolute; top: 0; left: 0; z-index: 450;
+  pointer-events: none; cursor: crosshair;
+}
+#draw-canvas.active { pointer-events: auto; cursor: none; }
+
+#cursor-circle {
+  position: fixed; pointer-events: none; z-index: 9999;
+  border: 2px solid rgba(255,255,255,0.8); border-radius: 50%;
+  transform: translate(-50%, -50%); display: none;
+  box-shadow: 0 0 4px rgba(0,0,0,0.5);
+}
+
+#toast {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  background: rgba(22,33,62,0.95); color: #eee; padding: 10px 20px;
+  border-radius: 8px; font-size: 13px; z-index: 2000; opacity: 0;
+  transition: opacity 0.3s; pointer-events: none;
+}
+#toast.show { opacity: 1; }
+#coverage-display { font-size: 13px; color: #e94560; font-weight: 500; min-width: 40px; text-align: right; }
+.separator { width: 1px; height: 24px; background: rgba(255,255,255,0.15); }
+#sync-status { font-size: 11px; color: #888; min-width: 60px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+#sync-status.synced { color: #4caf50; }
+#sync-status.syncing { color: #ff9800; }
+#sync-status.error { color: #f44336; }
+#modal-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 5000;
+  background: rgba(0,0,0,0.6); display: none; align-items: center; justify-content: center;
+}
+#modal-overlay.show { display: flex; }
+#modal {
+  background: #1a1a2e; border: 1px solid rgba(255,255,255,0.15); border-radius: 12px;
+  padding: 24px; width: 520px; max-width: 90vw; max-height: 80vh; overflow-y: auto;
+}
+#modal h3 { margin: 0 0 16px; font-size: 16px; }
+#modal p { font-size: 13px; color: #aab; margin: 0 0 10px; line-height: 1.5; }
+#modal code { background: #334; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+#modal ol { font-size: 13px; color: #aab; margin: 0 0 10px; padding-left: 20px; line-height: 1.8; }
+#modal input[type="text"] {
+  width: 100%; padding: 10px; background: #16213e; border: 1px solid #445; border-radius: 6px;
+  color: #eee; font-size: 13px; margin-bottom: 12px;
+}
+#modal .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+#modal-connect { background: #4285f4; }
+#modal-connect:hover { background: #3367d6; }
+</style>
+</head>
+<body>
+
+<div id="controls">
+  <div class="control-group">
+    <label for="brush-color">Color</label>
+    <input type="color" id="brush-color" value="#e94560">
+
+    <label for="brush-opacity">Opacity</label>
+    <input type="range" id="brush-opacity" min="5" max="100" value="50">
+    <span class="val" id="brush-opacity-val">50%</span>
+
+    <span id="sync-status"></span>
+  </div>
+  <div class="control-group">
+    <label for="brush-size">Size</label>
+    <input type="range" id="brush-size" min="3" max="60" value="16">
+    <span class="val" id="brush-size-val">16</span>
+
+    <span id="mode-indicator">Viewing</span>
+    <span id="coverage-display">0%</span>
+    <span class="separator"></span>
+    <button id="btn-gdrive" class="secondary" title="Sync to Google Drive">GDrive</button>
+  </div>
+  <div class="control-group">
+    <span class="spacer"></span>
+    <button id="btn-draw" class="secondary">Draw</button>
+    <button id="btn-eraser" class="secondary">Eraser</button>
+  </div>
+</div>
+
+<div id="map"></div>
+<canvas id="draw-canvas"></canvas>
+<div id="cursor-circle"></div>
+<div id="toast"></div>
+
+<div id="modal-overlay">
+  <div id="modal">
+    <h3>Google Drive Sync</h3>
+    <p>Connect your Google Drive to save and load highlights across devices.</p>
+    <p style="color:#888; font-size:12px;">You'll be redirected to Google to grant access, then returned here automatically.</p>
+    <div class="modal-actions">
+      <button id="modal-cancel" class="secondary">Cancel</button>
+      <button id="modal-connect">Connect to Drive</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+(function() {
+  var STORAGE_KEY = 'cover-highlights';
+  var GDRIVE_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwOpYl5jIFwU5q3aIzXKAm6dB8bYiBa_Q0phx7hMTWozwXWcAA1RySwKI3lzJgqg0NBjQ/exec';  // Set to your deployed Apps Script URL, e.g. 'https://script.google.com/macros/s/XXXX/exec'
+  var FILE_NAME = 'cover-map-highlights.json';
+  var canvas = document.getElementById('draw-canvas');
+  var ctx = canvas.getContext('2d');
+  var cursorEl = document.getElementById('cursor-circle');
+
+  var highlights = [];
+  var currentStroke = null;
+  var isDrawing = false;
+  var drawMode = false;
+  var eraserMode = false;
+  var globalOpacity = 0.5;
+
+  function loadData() {
+    try {
+      var raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        var data = JSON.parse(raw);
+        highlights = data.highlights || [];
+        globalOpacity = data.globalOpacity || 0.5;
+      }
+    } catch(e) { console.warn('Failed to load data', e); }
+  }
+
+  function saveData() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ highlights: highlights, globalOpacity: globalOpacity }));
+    } catch(e) { console.warn('Failed to save data', e); }
+  }
+
+  var map = L.map('map', {
+    center: [36.5, 138.0],
+    zoom: 6,
+    zoomControl: false
+  });
+
+  L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors',
+    maxZoom: 19
+  }).addTo(map);
+
+  function resizeCanvas() {
+    var mapEl = document.getElementById('map');
+    var rect = mapEl.getBoundingClientRect();
+    canvas.width = rect.width;
+    canvas.height = rect.height;
+    canvas.style.width = rect.width + 'px';
+    canvas.style.height = rect.height + 'px';
+    canvas.style.top = rect.top + 'px';
+    canvas.style.left = rect.left + 'px';
+    renderAll();
+  }
+
+  function latLngToPixel(lat, lng) {
+    var point = map.latLngToContainerPoint([lat, lng]);
+    return [point.x, point.y];
+  }
+
+  function pixelToLatLng(x, y) {
+    var point = map.containerPointToLatLng([x, y]);
+    return [point.lat, point.lng];
+  }
+
+  function getBrushSize() {
+    return parseInt(document.getElementById('brush-size').value);
+  }
+
+  function renderAll() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    for (var i = 0; i < highlights.length; i++) {
+      renderStroke(highlights[i], highlights[i].opacity != null ? highlights[i].opacity : globalOpacity);
+    }
+    if (currentStroke) {
+      renderStroke(currentStroke, currentStroke.opacity != null ? currentStroke.opacity : globalOpacity);
+    }
+    updateCoverage();
+  }
+
+  function renderStroke(stroke, opacity) {
+    if (!stroke.points || stroke.points.length < 2) return;
+    var drawZoom = stroke.zoom != null ? stroke.zoom : map.getZoom();
+    var scale = Math.pow(2, map.getZoom() - drawZoom);
+    ctx.save();
+    ctx.globalAlpha = opacity;
+    ctx.strokeStyle = stroke.color;
+    ctx.lineWidth = Math.max(4, stroke.size * scale); //zoom out show
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    var first = latLngToPixel(stroke.points[0][0], stroke.points[0][1]);
+    ctx.moveTo(first[0], first[1]);
+    for (var i = 1; i < stroke.points.length; i++) {
+      var pt = latLngToPixel(stroke.points[i][0], stroke.points[i][1]);
+      ctx.lineTo(pt[0], pt[1]);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function updateCoverage() {
+    if (canvas.width === 0 || canvas.height === 0) return;
+    var imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    var pixels = imageData.data;
+    var covered = 0;
+    var total = pixels.length / 4;
+    for (var i = 3; i < pixels.length; i += 4) {
+      if (pixels[i] > 0) covered++;
+    }
+    var pct = total > 0 ? Math.round((covered / total) * 100) : 0;
+    document.getElementById('coverage-display').textContent = pct + '%';
+  }
+
+  function eraseAt(clientX, clientY) {
+    var rect = canvas.getBoundingClientRect();
+    var x = clientX - rect.left;
+    var y = clientY - rect.top;
+    var radius = getBrushSize() / 2;
+    var changed = false;
+    for (var s = highlights.length - 1; s >= 0; s--) {
+      var stroke = highlights[s];
+      var drawZoom = stroke.zoom != null ? stroke.zoom : map.getZoom();
+      var scale = Math.pow(2, map.getZoom() - drawZoom);
+      var scaledSize = Math.max(4, stroke.size * scale); //zoom out edit
+      for (var i = 0; i < stroke.points.length; i++) {
+        var pt = latLngToPixel(stroke.points[i][0], stroke.points[i][1]);
+        var dx = pt[0] - x;
+        var dy = pt[1] - y;
+        var dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < radius + scaledSize / 2) {
+          highlights.splice(s, 1);
+          changed = true;
+          break;
+        }
+      }
+    }
+    if (changed) {
+      saveData();
+      renderAll();
+    }
+  }
+
+  function startDraw(clientX, clientY) {
+    if (!drawMode && !eraserMode) return;
+    var rect = canvas.getBoundingClientRect();
+    var x = clientX - rect.left;
+    var y = clientY - rect.top;
+    if (x < 0 || y < 0 || x > canvas.width || y > canvas.height) return;
+    isDrawing = true;
+    if (eraserMode) {
+      eraseAt(clientX, clientY);
+      return;
+    }
+    var latlng = pixelToLatLng(x, y);
+    currentStroke = {
+      points: [latlng],
+      color: document.getElementById('brush-color').value,
+      size: getBrushSize(),
+      zoom: map.getZoom(),
+      opacity: globalOpacity
+    };
+  }
+
+  function moveDraw(clientX, clientY) {
+    if (!isDrawing) return;
+    if (eraserMode) {
+      eraseAt(clientX, clientY);
+      return;
+    }
+    if (!currentStroke) return;
+    var rect = canvas.getBoundingClientRect();
+    var x = clientX - rect.left;
+    var y = clientY - rect.top;
+    var latlng = pixelToLatLng(x, y);
+    currentStroke.points.push(latlng);
+    renderAll();
+  }
+
+  function endDraw() {
+    if (!isDrawing) return;
+    isDrawing = false;
+    if (currentStroke && currentStroke.points.length > 1) {
+      highlights.push(currentStroke);
+      saveData();
+    }
+    currentStroke = null;
+    renderAll();
+  }
+
+  function isInMapArea(clientX, clientY) {
+    var rect = canvas.getBoundingClientRect();
+    return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+  }
+
+  function updateCursor(clientX, clientY) {
+    if ((!drawMode && !eraserMode) || !isInMapArea(clientX, clientY)) {
+      cursorEl.style.display = 'none';
+      return;
+    }
+    var size = getBrushSize();
+    cursorEl.style.display = 'block';
+    cursorEl.style.left = clientX + 'px';
+    cursorEl.style.top = clientY + 'px';
+    cursorEl.style.width = size + 'px';
+    cursorEl.style.height = size + 'px';
+    cursorEl.style.borderColor = eraserMode ? '#ff4444' : document.getElementById('brush-color').value;
+    cursorEl.style.background = eraserMode ? 'rgba(255,68,68,0.2)' : 'transparent';
+  }
+
+  document.addEventListener('mousedown', function(e) {
+    if (e.target === canvas && (drawMode || eraserMode)) {
+      startDraw(e.clientX, e.clientY);
+    }
+  });
+
+  document.addEventListener('mousemove', function(e) {
+    updateCursor(e.clientX, e.clientY);
+    if (isDrawing) {
+      moveDraw(e.clientX, e.clientY);
+    }
+  });
+
+  document.addEventListener('mouseup', function(e) {
+    if (isDrawing) {
+      endDraw();
+    }
+  });
+
+  canvas.addEventListener('touchstart', function(e) {
+    e.preventDefault();
+    if ((drawMode || eraserMode) && e.touches.length > 0) {
+      startDraw(e.touches[0].clientX, e.touches[0].clientY);
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchmove', function(e) {
+    e.preventDefault();
+    if (e.touches.length > 0) {
+      moveDraw(e.touches[0].clientX, e.touches[0].clientY);
+    }
+  }, { passive: false });
+
+  canvas.addEventListener('touchend', function(e) {
+    e.preventDefault();
+    endDraw();
+  });
+
+  map.on('moveend zoomend resize', renderAll);
+  map.on('move', renderAll);
+
+  var brushSize = document.getElementById('brush-size');
+  var brushSizeVal = document.getElementById('brush-size-val');
+  brushSize.addEventListener('input', function() { brushSizeVal.textContent = brushSize.value; });
+
+  var brushOpacity = document.getElementById('brush-opacity');
+  var brushOpacityVal = document.getElementById('brush-opacity-val');
+  brushOpacity.addEventListener('input', function() {
+    var val = parseInt(brushOpacity.value);
+    brushOpacityVal.textContent = val + '%';
+    globalOpacity = val / 100;
+    for (var i = 0; i < highlights.length; i++) {
+      highlights[i].opacity = globalOpacity;
+    }
+    saveData();
+    renderAll();
+  });
+
+  var brushColor = document.getElementById('brush-color');
+  
+  brushColor.addEventListener('input', function() {
+    var newColor = brushColor.value;
+    for (var i = 0; i < highlights.length; i++) {
+      highlights[i].color = newColor;
+    }
+    saveData();
+    renderAll();
+  });
+
+  var btnDraw = document.getElementById('btn-draw');
+  var btnEraser = document.getElementById('btn-eraser');
+  var modeIndicator = document.getElementById('mode-indicator');
+
+  function setActiveTool(tool) {
+    drawMode = tool === 'draw';
+    eraserMode = tool === 'eraser';
+    isDrawing = false;
+    currentStroke = null;
+    btnDraw.classList.toggle('secondary', !drawMode);
+    btnEraser.classList.toggle('secondary', !eraserMode);
+    btnDraw.textContent = drawMode ? 'Drawing' : 'Draw';
+    btnEraser.textContent = eraserMode ? 'Erasing' : 'Eraser';
+    modeIndicator.textContent = drawMode ? 'Drawing' : eraserMode ? 'Erasing' : 'Viewing';
+    modeIndicator.classList.toggle('active', drawMode || eraserMode);
+    canvas.classList.toggle('active', drawMode || eraserMode);
+    map.dragging[drawMode || eraserMode ? 'disable' : 'enable']();
+    cursorEl.style.display = 'none';
+  }
+
+  btnDraw.addEventListener('click', function(e) {
+    e.stopPropagation();
+    setActiveTool(drawMode ? 'none' : 'draw');
+  });
+
+  btnEraser.addEventListener('click', function(e) {
+    e.stopPropagation();
+    setActiveTool(eraserMode ? 'none' : 'eraser');
+  });
+
+  function toast(msg) {
+    var el = document.getElementById('toast');
+    el.textContent = msg;
+    el.classList.add('show');
+    setTimeout(function() { el.classList.remove('show'); }, 1500);
+  }
+
+  function setSyncStatus(status, text) {
+    var el = document.getElementById('sync-status');
+    el.className = status;
+    el.textContent = text;
+  }
+
+  function isGDriveConfigured() {
+    return GDRIVE_SCRIPT_URL && GDRIVE_SCRIPT_URL.length > 10;
+  }
+
+  function syncToGDrive() {
+    if (!isGDriveConfigured()) return;
+
+    var token = localStorage.getItem('gdrive_token');
+    var fileId = localStorage.getItem('gdrive_fileId');
+
+    if (!token || !fileId) return;
+
+    setSyncStatus('syncing', 'Saving...');
+    var payload = JSON.stringify({ highlights: highlights, globalOpacity: globalOpacity });
+
+    fetch('https://www.googleapis.com/upload/drive/v3/files/' + fileId + '?uploadType=media', {
+      method: 'PATCH',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'Content-Type': 'application/json'
+      },
+      body: payload
+    })
+    .then(function(response) {
+      if (response.ok) {
+        setSyncStatus('synced', 'Saved');
+        setTimeout(function() { setSyncStatus('', ''); }, 3000);
+      } else if (response.status === 401) {
+        setSyncStatus('syncing', 'Refreshing Auth...');
+        localStorage.removeItem('gdrive_token'); 
+        
+        openGDriveAuth();
+      } else {
+        setSyncStatus('error', 'Save failed');
+      }
+    })
+    .catch(function(err) {
+      setSyncStatus('error', 'Network error');
+    });
+  }
+  
+  function loadFromGDrive(callback) {
+    if (!isGDriveConfigured()) { callback(); return; }
+    console.log('loadFromGDrive called');
+    setSyncStatus('syncing', 'Loading...');
+    var cbName = 'gdrive_cb_' + Date.now();
+    var script = document.createElement('script');
+    var timeout = setTimeout(function() {
+      console.log('loadFromGDrive timeout');
+      window[cbName] = null;
+      try { script.remove(); } catch(e) {}
+      setSyncStatus('error', 'Not connected - click GDrive');
+      setTimeout(function() { setSyncStatus('', ''); }, 5000);
+      callback();
+    }, 15000);
+    var attempts = 0;
+    var maxAttempts = 3;
+    function tryLoad() {
+      attempts++;
+      console.log('loadFromGDrive attempt', attempts);
+      window[cbName] = function(data) {
+        console.log('loadFromGDrive callback:', data);
+        clearTimeout(timeout);
+        window[cbName] = null;
+        try { script.remove(); } catch(e) {}
+        if (data && data.error) {
+          setSyncStatus('error', 'Failed: ' + data.error);
+          setTimeout(function() { setSyncStatus('', ''); }, 5000);
+          callback();
+          return;
+        }
+        if (data && data.highlights) {
+          highlights = data.highlights;
+          globalOpacity = data.globalOpacity != null ? data.globalOpacity : 0.5;
+          saveData();
+          setSyncStatus('synced', 'Loaded');
+          setTimeout(function() { setSyncStatus('', ''); }, 3000);
+        } else {
+          setSyncStatus('synced', 'No data');
+          setTimeout(function() { setSyncStatus('', ''); }, 3000);
+        }
+        callback();
+      };
+      script.src = GDRIVE_SCRIPT_URL + (GDRIVE_SCRIPT_URL.indexOf('?') >= 0 ? '&' : '?') + 'callback=' + cbName;
+      script.onerror = function() {
+        console.log('loadFromGDrive script error, attempt', attempts);
+        clearTimeout(timeout);
+        window[cbName] = null;
+        try { script.remove(); } catch(e) {}
+        if (attempts < maxAttempts) {
+          setTimeout(tryLoad, 1000);
+        } else {
+          setSyncStatus('error', 'Not connected - click GDrive');
+          setTimeout(function() { setSyncStatus('', ''); }, 5000);
+          callback();
+        }
+      };
+      document.body.appendChild(script);
+    }
+    tryLoad();
+  }
+
+  function isCapacitor() {
+    return typeof Capacitor !== 'undefined' && Capacitor.isNativePlatform();
+  }
+
+  function openGDriveAuth() {
+    if (!isGDriveConfigured()) {
+      toast('Google Drive sync not configured');
+      return;
+    }
+    saveData();
+    var appUrl = window.location.href.replace(/[?#].*$/, '');
+    var redirectUrl = isCapacitor() ? 'covermap://auth' : appUrl;
+    var targetUrl = GDRIVE_SCRIPT_URL + '?redirect=' + encodeURIComponent(redirectUrl);
+
+    if (isCapacitor() && Capacitor.Plugins.Browser) {
+      Capacitor.Plugins.Browser.open({ url: targetUrl });
+    } else {
+      window.location.href = targetUrl;
+    }
+  }
+
+  if (typeof Capacitor !== 'undefined' && Capacitor.Plugins && Capacitor.Plugins.App) {
+      Capacitor.Plugins.App.addListener('appUrlOpen', function(data) {
+        if (data && data.url && data.url.indexOf('covermap://') === 0) {
+          
+          if (Capacitor.Plugins.Browser) {
+            Capacitor.Plugins.Browser.close();
+          }
+
+          var urlParams = new URLSearchParams(data.url.split('?')[1] || '');
+          var gdriveData = urlParams.get('data');
+          var gdriveError = urlParams.get('error');
+          var token = urlParams.get('token');
+          var fileId = urlParams.get('fileId');
+
+          if (token && fileId) {
+            localStorage.setItem('gdrive_token', token);
+            localStorage.setItem('gdrive_fileId', fileId);
+            
+            scheduleSync();
+          }
+
+          if (gdriveError) {
+            setSyncStatus('error', 'Failed: ' + decodeURIComponent(gdriveError));
+            setTimeout(function() { setSyncStatus('', ''); }, 5000);
+            return;
+          }
+
+          if (gdriveData) {
+            try {
+              var parsed = JSON.parse(decodeURIComponent(gdriveData));
+              highlights = parsed.highlights || [];
+              globalOpacity = parsed.globalOpacity != null ? parsed.globalOpacity : 0.5;
+              saveData();
+              var opacityPercent = Math.round(globalOpacity * 100);
+              brushOpacity.value = opacityPercent;
+              brushOpacityVal.textContent = opacityPercent + '%';
+              renderAll();
+              setSyncStatus('synced', 'Loaded');
+              setTimeout(function() { setSyncStatus('', ''); }, 3000);
+              toast('Connected to GDrive');
+            } catch(e) {
+              console.log('Failed to parse GDrive data:', e);
+              setSyncStatus('error', 'Parse failed');
+              setTimeout(function() { setSyncStatus('', ''); }, 5000);
+            }
+          } else {
+            toast('No data returned');
+          }
+        }
+    });
+  }
+
+  var syncDebounce = null;
+  function scheduleSync() {
+    if (!isGDriveConfigured()) return;
+    clearTimeout(syncDebounce);
+    syncDebounce = setTimeout(syncToGDrive, 1500);
+  }
+
+  var modalOverlay = document.getElementById('modal-overlay');
+  var btnGdrive = document.getElementById('btn-gdrive');
+
+  btnGdrive.addEventListener('click', function(e) {
+    e.stopPropagation();
+    if (!isGDriveConfigured()) {
+      toast('Google Drive sync not configured');
+      return;
+    }
+    modalOverlay.classList.add('show');
+  });
+
+  document.getElementById('modal-cancel').addEventListener('click', function(e) {
+    e.stopPropagation();
+    modalOverlay.classList.remove('show');
+  });
+
+  document.getElementById('modal-connect').addEventListener('click', function(e) {
+    e.stopPropagation();
+    modalOverlay.classList.remove('show');
+    openGDriveAuth();
+  });
+
+  modalOverlay.addEventListener('click', function(e) {
+    if (e.target === modalOverlay) modalOverlay.classList.remove('show');
+  });
+
+  var origSaveData = saveData;
+  saveData = function() {
+    origSaveData();
+    scheduleSync();
+  };
+
+  loadData();
+  var opacityPercent = Math.round(globalOpacity * 100);
+  brushOpacity.value = opacityPercent;
+  brushOpacityVal.textContent = opacityPercent + '%';
+
+  window.addEventListener('resize', resizeCanvas);
+  resizeCanvas();
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js').catch(function() {});
+  }
+
+  if (isGDriveConfigured()) {
+    if (localStorage.getItem('gdrive_token')) {
+      loadFromGDrive(function() {
+        var opacityPercent = Math.round(globalOpacity * 100);
+        brushOpacity.value = opacityPercent;
+        brushOpacityVal.textContent = opacityPercent + '%';
+        renderAll();
+        toast('Loaded from GDrive');
+      });
+    } else {
+      setSyncStatus('', 'Not connected');
+    }
+  }
+})();
+</script>
+</body>
+</html>
