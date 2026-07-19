@@ -10,15 +10,11 @@ You can use it without syncing and keep data locally but they may get wiped once
 
 ## set up
 - add **android** folder as a new project in Android Studio.
-- create a new project on [App Script](https://script.google.com)
-- paste [gdrive-script](/gdrive-script.gs)'s content into your new project
-- deploy -> new deployement -> web app -> user accessing the web app -> all users owning a Google account (or *me only* depending on your preference)
-- change [index](/www/index.html) at *GDRIVE_SCRIPT_URL* with yours.
+- (optional) create a new project on [Google Cloud](https://console.cloud.google.com)
+- (optional) create a new client -> android -> package name (here it's com.covermap.app) -> SHA-1 certificate (check online how to get it)
 - that's it. 
 
 After any changes in [www](/www) folder, run `npx cap sync android` to update the android project.
-
-After any changes in [gdrive-script](gdrive-script.gs), paste it to your App Script and save. Then *manage deployement* -> select yours, edit (pencil icon) -> change version to *new version*.
 
 ## functionalities
 - change all highlights color / opacity
