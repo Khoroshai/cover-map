@@ -23,6 +23,7 @@ After any changes in [www](/www) folder, run `npx cap sync android` to update th
 - load / save to GDrive
 - zoomed out visibility
 - highlighted area percentage
+- add photos to places
 
 ## security & bugs
 That's a quick project made just for fun.

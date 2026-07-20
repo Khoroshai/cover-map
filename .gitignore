@@ -37,6 +37,7 @@ node_modules
 
 # Android build outputs
 android/app/build/
+android/app/release/
 android/capacitor-cordova-android-plugins/build/
 android/.gradle/
 android/local.properties
