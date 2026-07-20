@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Cover Map Highlighter</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
@@ -33,6 +33,10 @@ button.secondary:hover { background: #445; }
 #mode-indicator.active { background: #e94560; }
 
 #map { width: 100vw; height: 100vh; padding-top: 60px; background: #0f3460; }
+#photo-thumbs-container {
+  position: absolute; top: 0; left: 0; z-index: 460;
+  pointer-events: none;
+}
 #draw-canvas {
   position: absolute; top: 0; left: 0; z-index: 450;
   pointer-events: none; cursor: crosshair;
@@ -79,6 +83,85 @@ button.secondary:hover { background: #445; }
 #modal .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
 #modal-connect { background: #4285f4; }
 #modal-connect:hover { background: #3367d6; }
+
+#photo-picker-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 5000;
+  background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center;
+}
+#photo-picker-overlay.show { display: flex; }
+#photo-picker {
+  background: #1a1a2e; border: 1px solid rgba(255,255,255,0.15); border-radius: 12px;
+  padding: 20px; width: 520px; max-width: 90vw; max-height: 80vh; display: flex; flex-direction: column;
+}
+#photo-picker h3 { margin: 0 0 12px; font-size: 16px; }
+#photo-picker-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px;
+  overflow-y: auto; flex: 1; max-height: 50vh; padding: 4px;
+}
+#photo-picker-grid .photo-item {
+  aspect-ratio: 1; border-radius: 6px; overflow: hidden; cursor: pointer;
+  border: 3px solid transparent; transition: border-color 0.15s, transform 0.15s;
+  position: relative;
+}
+#photo-picker-grid .photo-item:hover { transform: scale(1.05); }
+#photo-picker-grid .photo-item.selected { border-color: #e94560; }
+#photo-picker-grid .photo-item img { width: 100%; height: 100%; object-fit: cover; }
+#photo-picker-grid .photo-item .check {
+  position: absolute; top: 4px; right: 4px; width: 22px; height: 22px;
+  background: #e94560; border-radius: 50%; display: none; align-items: center;
+  justify-content: center; font-size: 13px; color: #fff; font-weight: bold;
+}
+#photo-picker-grid .photo-item.selected .check { display: flex; }
+#photo-picker-load-more {
+  margin-top: 10px; text-align: center;
+}
+#photo-picker-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+#photo-picker-empty { text-align: center; color: #888; padding: 40px 0; font-size: 13px; }
+
+#photo-viewer-overlay {
+  position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 6000;
+  background: rgba(0,0,0,0.9); display: none; align-items: center; justify-content: center;
+}
+#photo-viewer-overlay.show { display: flex; }
+#photo-viewer-content { max-width: 90vw; max-height: 90vh; position: relative; }
+#photo-viewer-content img { max-width: 100%; max-height: 85vh; object-fit: contain; border-radius: 4px; }
+#photo-viewer-counter {
+  position: fixed; top: 16px; left: 50%; transform: translateX(-50%);
+  color: #ccc; font-size: 13px; z-index: 6001;
+}
+#photo-viewer-close {
+  position: fixed; top: 16px; right: 16px; z-index: 6001;
+  background: rgba(255,255,255,0.15); border: none; color: #fff;
+  width: 36px; height: 36px; border-radius: 50%; font-size: 18px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+#photo-viewer-close:hover { background: rgba(255,255,255,0.3); }
+#photo-viewer-delete {
+  position: fixed; bottom: 24px; right: 24px; z-index: 6001;
+  background: rgba(220,50,50,0.8); border: none; color: #fff;
+  padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer;
+}
+#photo-viewer-delete:hover { background: rgba(220,50,50,1); }
+#photo-viewer-nav {
+  position: fixed; top: 50%; transform: translateY(-50%); z-index: 6001;
+  background: rgba(255,255,255,0.1); border: none; color: #fff;
+  width: 44px; height: 44px; border-radius: 50%; font-size: 20px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+}
+#photo-viewer-nav:hover { background: rgba(255,255,255,0.25); }
+.photo-viewer-prev { left: 16px; }
+.photo-viewer-next { right: 16px; }
+
+.photo-thumb {
+  position: absolute; z-index: 460; width: 48px; height: 48px;
+  border-radius: 6px; overflow: hidden; cursor: pointer;
+  border: 2px solid rgba(255,255,255,0.9); box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  transition: transform 0.15s; pointer-events: auto;
+  background: #334; display: flex; align-items: center; justify-content: center;
+}
+.photo-thumb:hover { transform: scale(1.15); z-index: 461; }
+.photo-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.photo-thumb-placeholder { color: #888; font-size: 18px; }
 </style>
 </head>
 <body>
@@ -108,11 +191,15 @@ button.secondary:hover { background: #445; }
     <span class="spacer"></span>
     <button id="btn-draw" class="secondary">Draw</button>
     <button id="btn-eraser" class="secondary">Eraser</button>
+    <span class="separator"></span>
+    <button id="btn-photo" class="secondary">Photo</button>
+    <button id="btn-toggle-photos" class="secondary">Hide</button>
   </div>
 </div>
 
 <div id="map"></div>
 <canvas id="draw-canvas"></canvas>
+<div id="photo-thumbs-container"></div>
 <div id="cursor-circle"></div>
 <div id="toast"></div>
 
@@ -126,6 +213,26 @@ button.secondary:hover { background: #445; }
       <button id="modal-connect">Connect to Drive</button>
     </div>
   </div>
+</div>
+
+<div id="photo-picker-overlay">
+  <div id="photo-picker">
+    <h3>Select Photos</h3>
+    <div id="photo-picker-grid"></div>
+    <div id="photo-picker-load-more"></div>
+    <div id="photo-picker-actions">
+      <button id="photo-picker-cancel" class="secondary">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="photo-viewer-overlay">
+  <div id="photo-viewer-counter"></div>
+  <button id="photo-viewer-close">&times;</button>
+  <button id="photo-viewer-delete">Delete</button>
+  <button class="photo-viewer-nav photo-viewer-prev" style="display:none">&#8249;</button>
+  <button class="photo-viewer-nav photo-viewer-next" style="display:none">&#8250;</button>
+  <div id="photo-viewer-content"></div>
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -143,6 +250,13 @@ button.secondary:hover { background: #445; }
   var eraserMode = false;
   var globalOpacity = 0.5;
 
+  var photoMode = false;
+  var photos = [];
+  var photoViewerCurrentIndex = 0;
+  var photoViewerPhotos = [];
+  var photoViewerCurrentPhoto = null;
+  var photoViewerPhotoIndex = -1;
+
   function loadData() {
     try {
       var raw = localStorage.getItem(STORAGE_KEY);
@@ -150,13 +264,14 @@ button.secondary:hover { background: #445; }
         var data = JSON.parse(raw);
         highlights = data.highlights || [];
         globalOpacity = data.globalOpacity || 0.5;
+        photos = data.photos || [];
       }
     } catch(e) { console.warn('Failed to load data', e); }
   }
 
   function saveData() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({ highlights: highlights, globalOpacity: globalOpacity }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ highlights: highlights, globalOpacity: globalOpacity, photos: photos }));
     } catch(e) { console.warn('Failed to save data', e); }
   }
 
@@ -182,6 +297,11 @@ button.secondary:hover { background: #445; }
     canvas.style.height = rect.height + 'px';
     canvas.style.top = rect.top + 'px';
     canvas.style.left = rect.left + 'px';
+    var thumbsContainer = document.getElementById('photo-thumbs-container');
+    thumbsContainer.style.width = rect.width + 'px';
+    thumbsContainer.style.height = rect.height + 'px';
+    thumbsContainer.style.top = rect.top + 'px';
+    thumbsContainer.style.left = rect.left + 'px';
     renderAll();
   }
 
@@ -320,6 +440,213 @@ button.secondary:hover { background: #445; }
     renderAll();
   }
 
+  function isPhotosAvailable() {
+    return isCapacitor() && Capacitor.Plugins.GoogleDrive;
+  }
+
+  function openPhotoPicker(lat, lng) {
+    if (!isPhotosAvailable()) {
+      toast('Google Photos not available. Connect to GDrive first.');
+      return;
+    }
+    var overlay = document.getElementById('photo-picker-overlay');
+    var grid = document.getElementById('photo-picker-grid');
+    grid.innerHTML = '<div id="photo-picker-empty">Opening Google Photos picker...</div>';
+    document.getElementById('photo-picker-load-more').innerHTML = '';
+    overlay.classList.add('show');
+
+    Capacitor.Plugins.GoogleDrive.createPickerSession()
+      .then(function(result) {
+        var sessionId = result.id;
+        var pickerUri = result.pickerUri;
+        if (!pickerUri) {
+          grid.innerHTML = '<div id="photo-picker-empty">Failed to create picker session</div>';
+          return;
+        }
+        if (typeof Capacitor.Plugins.Browser !== 'undefined') {
+          Capacitor.Plugins.Browser.open({ url: pickerUri });
+        } else {
+          window.open(pickerUri, '_blank');
+        }
+        grid.innerHTML = '<div id="photo-picker-empty">Select photos in Google Photos, then return here...</div>';
+        setTimeout(function() {
+          pollPickerSession(sessionId, lat, lng, 0);
+        }, 3000);
+      })
+      .catch(function(err) {
+        console.error('Failed to create picker session', err);
+        grid.innerHTML = '<div id="photo-picker-empty">Failed to start picker. Make sure GDrive is connected.</div>';
+      });
+  }
+
+  var pickerPollTimer = null;
+
+  function pollPickerSession(sessionId, lat, lng, retryCount) {
+    if (pickerPollTimer) clearTimeout(pickerPollTimer);
+    var maxRetries = 5;
+    var retryDelays = [3000, 5000, 8000, 12000, 20000];
+
+    Capacitor.Plugins.GoogleDrive.getSession({ sessionId: sessionId })
+      .then(function(result) {
+        if (result.mediaItemsSet) {
+          fetchPickedItems(sessionId, lat, lng);
+        } else {
+          var interval = 2000;
+          if (result.pollingConfig && result.pollingConfig.pollInterval) {
+            interval = parseInt(result.pollingConfig.pollInterval.replace('s', '')) * 1000;
+          }
+          pickerPollTimer = setTimeout(function() {
+            pollPickerSession(sessionId, lat, lng, 0);
+          }, interval);
+        }
+      })
+      .catch(function(err) {
+        console.error('Failed to poll session', err);
+        if (retryCount < maxRetries) {
+          var delay = retryDelays[retryCount] || 20000;
+          toast('Retrying... (' + (retryCount + 1) + '/' + maxRetries + ')');
+          pickerPollTimer = setTimeout(function() {
+            pollPickerSession(sessionId, lat, lng, retryCount + 1);
+          }, delay);
+        } else {
+          document.getElementById('photo-picker-grid').innerHTML =
+            '<div id="photo-picker-empty">Failed to check picker status. Please try again.</div>';
+        }
+      });
+  }
+
+  function fetchPickedItems(sessionId, lat, lng) {
+    var grid = document.getElementById('photo-picker-grid');
+    grid.innerHTML = '<div id="photo-picker-empty">Loading selected photos...</div>';
+    Capacitor.Plugins.GoogleDrive.listPickedMediaItems({ sessionId: sessionId })
+      .then(function(result) {
+        var items = result.mediaItems || [];
+        document.getElementById('photo-picker-overlay').classList.remove('show');
+        if (items.length > 0) {
+          var mediaIds = [];
+          var baseUrls = {};
+          var thumbPromises = [];
+          for (var i = 0; i < items.length; i++) {
+            var mf = items[i].mediaFile || items[i];
+            mediaIds.push(items[i].id);
+            baseUrls[items[i].id] = mf.baseUrl;
+            thumbPromises.push(
+              Capacitor.Plugins.GoogleDrive.fetchImageAsBase64({ url: mf.baseUrl + '=w96-h96-c' })
+                .then(function(r) { return 'data:' + r.mimeType + ';base64,' + r.base64; })
+                .catch(function() { return null; })
+            );
+          }
+          Promise.all(thumbPromises).then(function(thumbDataUrls) {
+            var thumbData = {};
+            for (var j = 0; j < mediaIds.length; j++) {
+              if (thumbDataUrls[j]) thumbData[mediaIds[j]] = thumbDataUrls[j];
+            }
+            var photoEntry = {
+              lat: lat,
+              lng: lng,
+              mediaIds: mediaIds,
+              baseUrls: baseUrls,
+              thumbData: thumbData,
+              zoom: map.getZoom()
+            };
+            photos.push(photoEntry);
+            saveData();
+            renderPhotos();
+            setActiveTool('none');
+            toast(mediaIds.length + ' photo(s) added');
+          });
+        } else {
+          toast('No photos selected');
+        }
+      })
+      .catch(function(err) {
+        console.error('Failed to fetch picked items', err);
+        document.getElementById('photo-picker-overlay').classList.remove('show');
+        toast('Failed to load selected photos');
+      });
+  }
+
+  function renderPhotos() {
+    var container = document.getElementById('photo-thumbs-container');
+    container.innerHTML = '';
+    for (var i = 0; i < photos.length; i++) {
+      var photo = photos[i];
+      var firstId = photo.mediaIds && photo.mediaIds.length > 0 ? photo.mediaIds[0] : null;
+      var thumbData = photo.thumbData && firstId ? photo.thumbData[firstId] : null;
+      var div = document.createElement('div');
+      div.className = 'photo-thumb';
+      div.dataset.index = i;
+      div.style.pointerEvents = 'auto';
+      var pos = latLngToPixel(photo.lat, photo.lng);
+      div.style.left = (pos[0] - 24) + 'px';
+      div.style.top = (pos[1] - 24) + 'px';
+      if (thumbData) {
+        var img = document.createElement('img');
+        img.src = thumbData;
+        div.appendChild(img);
+      } else {
+        var placeholder = document.createElement('div');
+        placeholder.className = 'photo-thumb-placeholder';
+        placeholder.textContent = '\uD83D\uDCF7';
+        div.appendChild(placeholder);
+      }
+      div.addEventListener('click', (function(idx) {
+        return function(e) {
+          e.stopPropagation();
+          openPhotoViewer(idx);
+        };
+      })(i));
+      container.appendChild(div);
+    }
+  }
+
+  function openPhotoViewer(photoIndex) {
+    var photo = photos[photoIndex];
+    if (!photo || !photo.mediaIds || photo.mediaIds.length === 0) return;
+    photoViewerPhotos = photo.mediaIds.slice();
+    photoViewerCurrentPhoto = photo;
+    photoViewerPhotoIndex = photoIndex;
+    photoViewerCurrentIndex = 0;
+    var overlay = document.getElementById('photo-viewer-overlay');
+    overlay.classList.add('show');
+    renderPhotoViewer();
+    var prevBtn = document.querySelector('.photo-viewer-prev');
+    var nextBtn = document.querySelector('.photo-viewer-next');
+    if (photoViewerPhotos.length > 1) {
+      prevBtn.style.display = 'flex';
+      nextBtn.style.display = 'flex';
+    } else {
+      prevBtn.style.display = 'none';
+      nextBtn.style.display = 'none';
+    }
+  }
+
+  function renderPhotoViewer() {
+    var content = document.getElementById('photo-viewer-content');
+    var counter = document.getElementById('photo-viewer-counter');
+    var mediaId = photoViewerPhotos[photoViewerCurrentIndex];
+    var thumbData = photoViewerCurrentPhoto && photoViewerCurrentPhoto.thumbData ? photoViewerCurrentPhoto.thumbData[mediaId] : null;
+    content.innerHTML = '';
+    if (thumbData) {
+      var img = document.createElement('img');
+      img.src = thumbData;
+      img.style.cursor = 'default';
+      content.appendChild(img);
+    } else {
+      content.innerHTML = '<div style="color:#888;text-align:center;padding:40px">No photo data available.</div>';
+    }
+    if (photoViewerPhotos.length > 1) {
+      counter.textContent = (photoViewerCurrentIndex + 1) + ' / ' + photoViewerPhotos.length;
+      counter.style.display = 'block';
+    } else {
+      counter.style.display = 'none';
+    }
+  }
+
+  function closePhotoViewer() {
+    document.getElementById('photo-viewer-overlay').classList.remove('show');
+  }
+
   function isInMapArea(clientX, clientY) {
     var rect = canvas.getBoundingClientRect();
     return clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
@@ -340,7 +667,20 @@ button.secondary:hover { background: #445; }
     cursorEl.style.background = eraserMode ? 'rgba(255,68,68,0.2)' : 'transparent';
   }
 
+  function handleMapClick(clientX, clientY) {
+    if (!photoMode) return false;
+    var rect = canvas.getBoundingClientRect();
+    var x = clientX - rect.left;
+    var y = clientY - rect.top;
+    if (x < 0 || y < 0 || x > canvas.width || y > canvas.height) return false;
+    var latlng = pixelToLatLng(x, y);
+    openPhotoPicker(latlng[0], latlng[1]);
+    return true;
+  }
+
   document.addEventListener('mousedown', function(e) {
+    if (photoMode && e.target !== canvas) return;
+    if (photoMode && handleMapClick(e.clientX, e.clientY)) return;
     if (e.target === canvas && (drawMode || eraserMode)) {
       startDraw(e.clientX, e.clientY);
     }
@@ -360,26 +700,35 @@ button.secondary:hover { background: #445; }
   });
 
   canvas.addEventListener('touchstart', function(e) {
-    e.preventDefault();
-    if ((drawMode || eraserMode) && e.touches.length > 0) {
-      startDraw(e.touches[0].clientX, e.touches[0].clientY);
+    if (drawMode || eraserMode || photoMode) {
+      e.preventDefault();
+      if (photoMode && e.touches.length > 0) {
+        if (handleMapClick(e.touches[0].clientX, e.touches[0].clientY)) return;
+      }
+      if ((drawMode || eraserMode) && e.touches.length > 0) {
+        startDraw(e.touches[0].clientX, e.touches[0].clientY);
+      }
     }
   }, { passive: false });
 
   canvas.addEventListener('touchmove', function(e) {
-    e.preventDefault();
-    if (e.touches.length > 0) {
-      moveDraw(e.touches[0].clientX, e.touches[0].clientY);
+    if (drawMode || eraserMode || photoMode) {
+      e.preventDefault();
+      if (e.touches.length > 0) {
+        moveDraw(e.touches[0].clientX, e.touches[0].clientY);
+      }
     }
   }, { passive: false });
 
   canvas.addEventListener('touchend', function(e) {
-    e.preventDefault();
-    endDraw();
+    if (drawMode || eraserMode || photoMode) {
+      e.preventDefault();
+      endDraw();
+    }
   });
 
-  map.on('moveend zoomend resize', renderAll);
-  map.on('move', renderAll);
+  map.on('moveend zoomend resize', function() { renderAll(); renderPhotos(); });
+  map.on('move', function() { renderAll(); renderPhotos(); });
 
   var brushSize = document.getElementById('brush-size');
   var brushSizeVal = document.getElementById('brush-size-val');
@@ -411,22 +760,27 @@ button.secondary:hover { background: #445; }
 
   var btnDraw = document.getElementById('btn-draw');
   var btnEraser = document.getElementById('btn-eraser');
+  var btnPhoto = document.getElementById('btn-photo');
   var modeIndicator = document.getElementById('mode-indicator');
 
   function setActiveTool(tool) {
     drawMode = tool === 'draw';
     eraserMode = tool === 'eraser';
+    photoMode = tool === 'photo';
     isDrawing = false;
     currentStroke = null;
     btnDraw.classList.toggle('secondary', !drawMode);
     btnEraser.classList.toggle('secondary', !eraserMode);
+    btnPhoto.classList.toggle('secondary', !photoMode);
     btnDraw.textContent = drawMode ? 'Drawing' : 'Draw';
     btnEraser.textContent = eraserMode ? 'Erasing' : 'Eraser';
-    modeIndicator.textContent = drawMode ? 'Drawing' : eraserMode ? 'Erasing' : 'Viewing';
-    modeIndicator.classList.toggle('active', drawMode || eraserMode);
-    canvas.classList.toggle('active', drawMode || eraserMode);
-    map.dragging[drawMode || eraserMode ? 'disable' : 'enable']();
+    btnPhoto.textContent = photoMode ? 'Photo' : 'Photo';
+    modeIndicator.textContent = drawMode ? 'Drawing' : eraserMode ? 'Erasing' : photoMode ? 'Photos' : 'Viewing';
+    modeIndicator.classList.toggle('active', drawMode || eraserMode || photoMode);
+    canvas.classList.toggle('active', drawMode || eraserMode || photoMode);
+    map.dragging[drawMode || eraserMode || photoMode ? 'disable' : 'enable']();
     cursorEl.style.display = 'none';
+    document.querySelectorAll('.photo-thumb').forEach(function(el) { el.style.pointerEvents = photoMode ? 'none' : 'auto'; });
   }
 
   btnDraw.addEventListener('click', function(e) {
@@ -437,6 +791,19 @@ button.secondary:hover { background: #445; }
   btnEraser.addEventListener('click', function(e) {
     e.stopPropagation();
     setActiveTool(eraserMode ? 'none' : 'eraser');
+  });
+
+  btnPhoto.addEventListener('click', function(e) {
+    e.stopPropagation();
+    setActiveTool(photoMode ? 'none' : 'photo');
+  });
+
+  var photosVisible = true;
+  document.getElementById('btn-toggle-photos').addEventListener('click', function(e) {
+    e.stopPropagation();
+    photosVisible = !photosVisible;
+    document.getElementById('photo-thumbs-container').style.display = photosVisible ? '' : 'none';
+    this.textContent = photosVisible ? 'Hide' : 'Show';
   });
 
   function toast(msg) {
@@ -467,7 +834,7 @@ button.secondary:hover { background: #445; }
   function syncToGDrive() {
     if (!isGDriveConfigured()) return;
     setSyncStatus('syncing', 'Saving...');
-    var payload = JSON.stringify({ highlights: highlights, globalOpacity: globalOpacity });
+    var payload = JSON.stringify({ highlights: highlights, globalOpacity: globalOpacity, photos: photos });
     Capacitor.Plugins.GoogleDrive.writeFile({ data: payload })
       .then(function(result) {
         if (result && result.ok) {
@@ -492,6 +859,7 @@ button.secondary:hover { background: #445; }
         if (data && data.highlights) {
           highlights = data.highlights;
           globalOpacity = data.globalOpacity != null ? data.globalOpacity : 0.5;
+          photos = data.photos || [];
           saveData();
           setSyncStatus('synced', 'Loaded');
           setTimeout(function() { setSyncStatus('', ''); }, 3000);
@@ -523,6 +891,7 @@ button.secondary:hover { background: #445; }
             brushOpacity.value = opacityPercent;
             brushOpacityVal.textContent = opacityPercent + '%';
             renderAll();
+            renderPhotos();
           });
         }
       })
@@ -566,6 +935,64 @@ button.secondary:hover { background: #445; }
     if (e.target === modalOverlay) modalOverlay.classList.remove('show');
   });
 
+  var photoPickerOverlay = document.getElementById('photo-picker-overlay');
+  document.getElementById('photo-picker-cancel').addEventListener('click', function(e) {
+    e.stopPropagation();
+    if (pickerPollTimer) { clearTimeout(pickerPollTimer); pickerPollTimer = null; }
+    photoPickerOverlay.classList.remove('show');
+  });
+  photoPickerOverlay.addEventListener('click', function(e) {
+    if (e.target === photoPickerOverlay) {
+      if (pickerPollTimer) { clearTimeout(pickerPollTimer); pickerPollTimer = null; }
+      photoPickerOverlay.classList.remove('show');
+    }
+  });
+
+  var photoViewerOverlay = document.getElementById('photo-viewer-overlay');
+  document.getElementById('photo-viewer-close').addEventListener('click', function(e) {
+    e.stopPropagation();
+    closePhotoViewer();
+  });
+  document.getElementById('photo-viewer-delete').addEventListener('click', function(e) {
+    e.stopPropagation();
+    if (photoViewerPhotoIndex >= 0 && photoViewerPhotoIndex < photos.length) {
+      photos.splice(photoViewerPhotoIndex, 1);
+      saveData();
+      renderPhotos();
+      closePhotoViewer();
+      toast('Photo deleted');
+    }
+  });
+  photoViewerOverlay.addEventListener('click', function(e) {
+    if (e.target === photoViewerOverlay) closePhotoViewer();
+  });
+  document.querySelector('.photo-viewer-prev').addEventListener('click', function(e) {
+    e.stopPropagation();
+    if (photoViewerCurrentIndex > 0) {
+      photoViewerCurrentIndex--;
+      renderPhotoViewer();
+    }
+  });
+  document.querySelector('.photo-viewer-next').addEventListener('click', function(e) {
+    e.stopPropagation();
+    if (photoViewerCurrentIndex < photoViewerPhotos.length - 1) {
+      photoViewerCurrentIndex++;
+      renderPhotoViewer();
+    }
+  });
+  document.addEventListener('keydown', function(e) {
+    if (!photoViewerOverlay.classList.contains('show')) return;
+    if (e.key === 'Escape') closePhotoViewer();
+    if (e.key === 'ArrowLeft' && photoViewerCurrentIndex > 0) {
+      photoViewerCurrentIndex--;
+      renderPhotoViewer();
+    }
+    if (e.key === 'ArrowRight' && photoViewerCurrentIndex < photoViewerPhotos.length - 1) {
+      photoViewerCurrentIndex++;
+      renderPhotoViewer();
+    }
+  });
+
   var origSaveData = saveData;
   saveData = function() {
     origSaveData();
@@ -593,6 +1020,7 @@ button.secondary:hover { background: #445; }
             brushOpacity.value = opacityPercent;
             brushOpacityVal.textContent = opacityPercent + '%';
             renderAll();
+            renderPhotos();
             toast('Loaded from GDrive');
           });
         } else {
