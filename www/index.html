@@ -526,6 +526,7 @@ button.secondary:hover { background: #445; }
           var mediaIds = [];
           var baseUrls = {};
           var thumbPromises = [];
+          var compressedPromises = [];
           for (var i = 0; i < items.length; i++) {
             var mf = items[i].mediaFile || items[i];
             mediaIds.push(items[i].id);
@@ -535,11 +536,21 @@ button.secondary:hover { background: #445; }
                 .then(function(r) { return 'data:' + r.mimeType + ';base64,' + r.base64; })
                 .catch(function() { return null; })
             );
+            compressedPromises.push(
+              Capacitor.Plugins.GoogleDrive.fetchCompressedImage({ url: mf.baseUrl })
+                .then(function(r) { return 'data:' + r.mimeType + ';base64,' + r.base64; })
+                .catch(function() { return null; })
+            );
           }
-          Promise.all(thumbPromises).then(function(thumbDataUrls) {
+          toast('Compressing photos...');
+          Promise.all([Promise.all(thumbPromises), Promise.all(compressedPromises)]).then(function(results) {
+            var thumbDataUrls = results[0];
+            var compressedDataUrls = results[1];
             var thumbData = {};
+            var compressedData = {};
             for (var j = 0; j < mediaIds.length; j++) {
               if (thumbDataUrls[j]) thumbData[mediaIds[j]] = thumbDataUrls[j];
+              if (compressedDataUrls[j]) compressedData[mediaIds[j]] = compressedDataUrls[j];
             }
             var photoEntry = {
               lat: lat,
@@ -547,6 +558,7 @@ button.secondary:hover { background: #445; }
               mediaIds: mediaIds,
               baseUrls: baseUrls,
               thumbData: thumbData,
+              compressedData: compressedData,
               zoom: map.getZoom()
             };
             photos.push(photoEntry);
@@ -625,11 +637,15 @@ button.secondary:hover { background: #445; }
     var content = document.getElementById('photo-viewer-content');
     var counter = document.getElementById('photo-viewer-counter');
     var mediaId = photoViewerPhotos[photoViewerCurrentIndex];
-    var thumbData = photoViewerCurrentPhoto && photoViewerCurrentPhoto.thumbData ? photoViewerCurrentPhoto.thumbData[mediaId] : null;
+    var imgData = null;
+    if (photoViewerCurrentPhoto) {
+      imgData = (photoViewerCurrentPhoto.compressedData && photoViewerCurrentPhoto.compressedData[mediaId])
+        || (photoViewerCurrentPhoto.thumbData && photoViewerCurrentPhoto.thumbData[mediaId]);
+    }
     content.innerHTML = '';
-    if (thumbData) {
+    if (imgData) {
       var img = document.createElement('img');
-      img.src = thumbData;
+      img.src = imgData;
       img.style.cursor = 'default';
       content.appendChild(img);
     } else {

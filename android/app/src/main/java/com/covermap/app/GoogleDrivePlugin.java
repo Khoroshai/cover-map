@@ -4,6 +4,9 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.IntentSender;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.os.Build;
 import android.util.Log;
 
 import androidx.security.crypto.EncryptedSharedPreferences;
@@ -706,5 +709,113 @@ public class GoogleDrivePlugin extends Plugin {
         res.put("base64", base64);
         res.put("mimeType", result.mimeType);
         call.resolve(res);
+    }
+
+    @PluginMethod
+    public void fetchCompressedImage(PluginCall call) {
+        String imageUrl = call.getString("url");
+        if (imageUrl == null) {
+            call.reject("No url provided");
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                // Fetch at 1200px for good source quality
+                String fetchUrl = imageUrl + "=w1200-h1200";
+                ImageFetchResult result = fetchImage(fetchUrl, null);
+                if (result.code != 200) {
+                    String token = getSecurePrefs().getString(KEY_TOKEN, null);
+                    if (token != null) {
+                        result = fetchImage(fetchUrl, token);
+                    }
+                }
+
+                if (result.code != 200 || result.bytes == null) {
+                    call.reject("Image fetch failed: HTTP " + result.code);
+                    return;
+                }
+
+                // Decode to Bitmap
+                Bitmap bitmap = BitmapFactory.decodeByteArray(result.bytes, 0, result.bytes.length);
+                if (bitmap == null) {
+                    call.reject("Failed to decode image");
+                    return;
+                }
+
+                // Scale to max 1200px on longest side
+                int maxDim = Math.max(bitmap.getWidth(), bitmap.getHeight());
+                if (maxDim > 1200) {
+                    float scale = 1200f / maxDim;
+                    int newW = Math.round(bitmap.getWidth() * scale);
+                    int newH = Math.round(bitmap.getHeight() * scale);
+                    Bitmap scaled = Bitmap.createScaledBitmap(bitmap, newW, newH, true);
+                    if (scaled != bitmap) {
+                        bitmap.recycle();
+                        bitmap = scaled;
+                    }
+                }
+
+                // Compress to WebP, targeting ≤200KB
+                byte[] compressed = compressToWebP(bitmap, 200 * 1024);
+                bitmap.recycle();
+
+                if (compressed == null) {
+                    call.reject("Compression failed");
+                    return;
+                }
+
+                String base64 = Base64.encodeToString(compressed, Base64.NO_WRAP);
+                JSObject res = new JSObject();
+                res.put("base64", base64);
+                res.put("mimeType", "image/webp");
+                call.resolve(res);
+            } catch (Exception e) {
+                Log.e(TAG, "fetchCompressedImage failed", e);
+                call.reject("Compressed fetch failed: " + e.getMessage());
+            }
+        }).start();
+    }
+
+    private byte[] compressToWebP(Bitmap bitmap, int targetBytes) {
+        // Binary search on quality to hit target size
+        int lo = 20, hi = 80;
+        byte[] best = null;
+
+        while (lo <= hi) {
+            int mid = (lo + hi) / 2;
+            byte[] data = compressWithQuality(bitmap, mid);
+            if (data == null) return null;
+
+            if (data.length <= targetBytes) {
+                best = data;
+                lo = mid + 1; // try higher quality
+            } else {
+                hi = mid - 1; // too large, lower quality
+            }
+        }
+
+        // If even lowest quality exceeds target, return the smallest we got
+        if (best == null) {
+            best = compressWithQuality(bitmap, 20);
+        }
+        return best;
+    }
+
+    private byte[] compressWithQuality(Bitmap bitmap, int quality) {
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            android.graphics.Bitmap.CompressFormat format;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                format = android.graphics.Bitmap.CompressFormat.WEBP_LOSSY;
+            } else {
+                format = android.graphics.Bitmap.CompressFormat.WEBP;
+            }
+            bitmap.compress(format, quality, baos);
+            return baos.toByteArray();
+        } catch (Exception e) {
+            Log.e(TAG, "compressWithQuality failed", e);
+            return null;
+        }
     }
 }
